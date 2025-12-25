@@ -105,7 +105,7 @@ absl::Status MlirToXlaComputation(
     // TODO(b/420837831): Remove this once we don't need to fall back to GSPMD.
     if (exec_build_options && exec_build_options->use_shardy_partitioner() &&
         xla::sdy::hasGspmdAttrsOrOps(module)) {
-      LOG(WARNING)
+      LOG(FATAL)
           << "Module has GSPMD attrs or ops, but Shardy is enabled. Disabling "
              "Shardy and falling back to using GSPMD propagation.";
       exec_build_options->set_use_shardy_partitioner(false);
@@ -283,7 +283,7 @@ absl::StatusOr<T> ExpectSuccess(mlir::FailureOr<T> result, std::string msg) {
 
 absl::StatusOr<std::string> SerializeUsingVersionedStablehlo(
     mlir::ModuleOp mlir_module, absl::string_view requested_target,
-    bool inplace, bool allow_mixed_serialization) {
+    bool inplace, bool allow_mixed_serialization, bool enable_hlo_sharding_v3) {
   mlir::MLIRContext* context = mlir_module->getContext();
   mlir::BaseScopedDiagnosticHandler diagnostic_handler(context);
 
@@ -307,7 +307,8 @@ absl::StatusOr<std::string> SerializeUsingVersionedStablehlo(
   // - For shardy, convert Shardy ops to StableHLO ops, and stringify the Shardy
   //   attributes.
   if (!allow_mixed_serialization) {
-    xla::sdy::addSdyRoundTripExportPipeline(pm);
+    xla::sdy::addSdyRoundTripExportPipeline(pm, /*keepMeshesInlined=*/false,
+                                            enable_hlo_sharding_v3);
   }
   pm.addPass(mlir::stablehlo_ext::createChloPreserveHighLevelOpsPass());
   pm.addNestedPass<mlir::func::FuncOp>(
