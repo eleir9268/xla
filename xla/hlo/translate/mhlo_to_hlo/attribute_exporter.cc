@@ -17,27 +17,39 @@ limitations under the License.
 
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <memory>
+#include <numeric>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/log/check.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/escaping.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LogicalResult.h"
+#include "mlir/AsmParser/AsmParser.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/SymbolTable.h"
+#include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "stablehlo/dialect/Base.h"
 #include "stablehlo/dialect/StablehloOps.h"
+#include "xla/array.h"
 #include "xla/hlo/ir/hlo_original_value.h"
 #include "xla/hlo/ir/hlo_sharding.h"
+#include "xla/hlo/ir/mesh_and_axis.h"
+#include "xla/hlo/ir/replica_group.h"
 #include "xla/hlo/parser/hlo_parser.h"
 #include "xla/hlo/translate/hlo_to_mhlo/hlo_utils.h"
 #include "xla/hlo/translate/mhlo_to_hlo/type_to_shape.h"
@@ -49,6 +61,7 @@ limitations under the License.
 #include "xla/service/spmd/shardy/utils.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
+#include "xla/tsl/platform/statusor.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
 
@@ -223,6 +236,220 @@ absl::StatusOr<xla::PrecisionConfig::Algorithm> ConvertDotAlgorithm(
   return Internal("Unknown dot algorithm");
 }
 
+absl::StatusOr<std::unique_ptr<xla::CollectiveDeviceListBase>>
+ConvertReplicaGroups(mlir::Attribute replica_groups, mlir::Operation* op) {
+  if (!replica_groups) {
+    return std::make_unique<xla::CollectiveDeviceList>(
+        std::vector<ReplicaGroup>());
+  }
+
+  if (auto dense_attr =
+          mlir::dyn_cast<mlir::DenseIntElementsAttr>(replica_groups)) {
+    TF_ASSIGN_OR_RETURN(std::vector<ReplicaGroup> groups,
+                        ConvertReplicaGroups(dense_attr));
+    return std::make_unique<xla::CollectiveDeviceList>(std::move(groups));
+  }
+
+  auto find_mesh_attribute = [&](auto attr)
+      -> absl::StatusOr<
+          std::pair<mlir::sdy::MeshAttr, mlir::stablehlo::MeshAttr>> {
+    mlir::sdy::MeshAttr mesh_attr;
+    mlir::stablehlo::MeshAttr stablehlo_mesh_attr;
+    mlir::Operation* mesh_op = nullptr;
+    std::string failed_lookup_name;
+
+    if (auto flat_ref =
+            mlir::dyn_cast<mlir::FlatSymbolRefAttr>(attr.getMesh())) {
+      mesh_op = mlir::SymbolTable::lookupNearestSymbolFrom<mlir::sdy::MeshOp>(
+          op, flat_ref);
+      if (!mesh_op) {
+        failed_lookup_name = flat_ref.getValue().str();
+      }
+    } else if (auto str_attr =
+                   mlir::dyn_cast<mlir::StringAttr>(attr.getMesh())) {
+      mesh_op = mlir::SymbolTable::lookupNearestSymbolFrom<mlir::sdy::MeshOp>(
+          op, str_attr);
+      if (!mesh_op) {
+        failed_lookup_name = str_attr.getValue().str();
+      }
+    } else if (auto inline_mesh =
+                   mlir::dyn_cast<mlir::sdy::MeshAttr>(attr.getMesh())) {
+      mesh_attr = inline_mesh;
+    } else if (auto inline_mesh =
+                   mlir::dyn_cast<mlir::stablehlo::MeshAttr>(attr.getMesh())) {
+      stablehlo_mesh_attr = inline_mesh;
+    } else {
+      return InvalidArgument("Expected mesh symbol or inlined mesh attribute");
+    }
+
+    if (!mesh_attr && !stablehlo_mesh_attr) {
+      if (!mesh_op) {
+        // Look in module frontend attributes for meshes.
+        if (auto module_op = op->getParentOfType<mlir::ModuleOp>()) {
+          if (auto frontend_attrs =
+                  module_op->getAttrOfType<mlir::DictionaryAttr>(
+                      "mhlo.frontend_attributes")) {
+            if (auto meshes_str_attr = mlir::dyn_cast_or_null<mlir::StringAttr>(
+                    frontend_attrs.get("xla.sdy.meshes"))) {
+              std::string unescaped_value;
+              std::string error;
+              if (absl::CUnescape(meshes_str_attr.getValue().str(),
+                                  &unescaped_value, &error)) {
+                if (auto parsed_attr = mlir::parseAttribute(unescaped_value,
+                                                            op->getContext())) {
+                  if (auto parsed_dict =
+                          mlir::dyn_cast<mlir::DictionaryAttr>(parsed_attr)) {
+                    if (auto mesh_val = parsed_dict.get(failed_lookup_name)) {
+                      mesh_attr = mlir::cast<mlir::sdy::MeshAttr>(mesh_val);
+                    } else if (parsed_dict.size() == 1) {
+                      mesh_attr = mlir::cast<mlir::sdy::MeshAttr>(
+                          parsed_dict.begin()->getValue());
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      if (!mesh_attr) {
+        if (!mesh_op) {
+          return InvalidArgument("Could not find mesh symbol: %s",
+                                 failed_lookup_name);
+        }
+        mesh_attr = mlir::cast<mlir::sdy::MeshOp>(mesh_op).getMesh();
+      }
+    }
+    return std::make_pair(mesh_attr, stablehlo_mesh_attr);
+  };
+
+  auto extract_mesh_info = [&](mlir::sdy::MeshAttr mesh_attr,
+                               mlir::stablehlo::MeshAttr stablehlo_mesh_attr) {
+    struct MeshInfo {
+      std::vector<std::string> axes_names;
+      std::vector<int64_t> axes_sizes;
+      std::vector<int64_t> device_ids;
+    } info;
+
+    if (mesh_attr) {
+      for (auto axis : mesh_attr.getAxes()) {
+        info.axes_names.push_back(axis.getName().str());
+        info.axes_sizes.push_back(axis.getSize());
+      }
+      if (!mesh_attr.getDeviceIds().empty()) {
+        info.device_ids = std::vector<int64_t>(mesh_attr.getDeviceIds().begin(),
+                                               mesh_attr.getDeviceIds().end());
+      }
+    } else if (stablehlo_mesh_attr) {
+      for (auto axis_attr : stablehlo_mesh_attr.getAxes()) {
+        auto axis = mlir::cast<mlir::stablehlo::MeshAxisAttr>(axis_attr);
+        info.axes_names.push_back(axis.getName().str());
+        info.axes_sizes.push_back(axis.getSize());
+      }
+      if (stablehlo_mesh_attr.getDeviceIds()) {
+        info.device_ids = std::vector<int64_t>(
+            stablehlo_mesh_attr.getDeviceIds().getValues<int64_t>().begin(),
+            stablehlo_mesh_attr.getDeviceIds().getValues<int64_t>().end());
+      }
+    }
+
+    if (info.device_ids.empty()) {
+      int64_t total_size = 1;
+      for (const auto& size : info.axes_sizes) {
+        total_size *= size;
+      }
+      info.device_ids.resize(total_size);
+      std::iota(info.device_ids.begin(), info.device_ids.end(), 0);
+    }
+    return info;
+  };
+
+  auto build_xla_mesh = [&](const auto& info) {
+    std::vector<absl::string_view> axes_names_sv;
+    axes_names_sv.reserve(info.axes_names.size());
+    for (const auto& name : info.axes_names) {
+      axes_names_sv.push_back(name);
+    }
+
+    std::vector<int64_t> iota_ids(info.device_ids.size());
+    std::iota(iota_ids.begin(), iota_ids.end(), 0);
+    if (info.device_ids == iota_ids) {
+      return xla::Mesh(info.axes_sizes, axes_names_sv);
+    }
+    xla::Array<int64_t> device_assignment(info.axes_sizes);
+    device_assignment.SetValues(info.device_ids);
+    return xla::Mesh(device_assignment, axes_names_sv);
+  };
+
+  auto build_axis_refs =
+      [&](auto attr,
+          const auto& axes_names) -> absl::StatusOr<std::vector<xla::AxisRef>> {
+    std::vector<xla::AxisRef> group_axes;
+    struct SubAxis {
+      int64_t pre_size;
+      int64_t size;
+    };
+    for (auto axis_ref_attr : attr.getAxes()) {
+      std::string name;
+      std::optional<SubAxis> sub_axis_info;
+
+      if (auto axis_ref =
+              mlir::dyn_cast<mlir::mhlo::AxisRefAttr>(axis_ref_attr)) {
+        name = axis_ref.getName().str();
+        if (auto sub = axis_ref.getSubAxisInfo()) {
+          sub_axis_info = {sub.getPreSize(), sub.getSize()};
+        }
+      } else if (auto axis_ref = mlir::dyn_cast<mlir::stablehlo::AxisRefAttr>(
+                     axis_ref_attr)) {
+        name = axis_ref.getName().str();
+        if (auto sub = axis_ref.getSubAxisInfo()) {
+          sub_axis_info = {sub.getPreSize(), sub.getSize()};
+        }
+      } else {
+        return InvalidArgument("Expected AxisRefAttr");
+      }
+
+      auto it = absl::c_find(axes_names, name);
+      if (it == axes_names.end()) {
+        return InvalidArgument("Unknown axis %s", name.c_str());
+      }
+      int64_t index = std::distance(axes_names.begin(), it);
+
+      xla::AxisRefProto proto;
+      proto.set_mesh_axis_index(index);
+      if (sub_axis_info) {
+        auto* sub = proto.mutable_sub_axis_info();
+        sub->set_pre_size(sub_axis_info->pre_size);
+        sub->set_size(sub_axis_info->size);
+      }
+      group_axes.push_back(xla::AxisRef::FromProto(proto));
+    }
+    return group_axes;
+  };
+
+  auto convert_mesh_axes = [&](auto attr)
+      -> absl::StatusOr<std::unique_ptr<xla::CollectiveDeviceListBase>> {
+    TF_ASSIGN_OR_RETURN(auto meshes, find_mesh_attribute(attr));
+    auto info = extract_mesh_info(meshes.first, meshes.second);
+    auto xla_mesh = build_xla_mesh(info);
+    TF_ASSIGN_OR_RETURN(auto group_axes,
+                        build_axis_refs(attr, info.axes_names));
+    return std::make_unique<xla::MeshAxesReplicaGroupList>(xla_mesh,
+                                                           group_axes);
+  };
+
+  if (auto attr = mlir::dyn_cast<mlir::mhlo::ReplicaGroupMeshAxesAttr>(
+          replica_groups)) {
+    return convert_mesh_axes(attr);
+  }
+  if (auto attr = mlir::dyn_cast<mlir::stablehlo::ReplicaGroupMeshAxesAttr>(
+          replica_groups)) {
+    return convert_mesh_axes(attr);
+  }
+
+  return InvalidArgument("Unknown replica groups attribute type");
+}
+
 // Convert replica group from MLIR encoding to HLO.
 // See HloFunctionImporter::ConvertReplicaGroups for the MLIR encoding.
 absl::StatusOr<std::vector<ReplicaGroup>> ConvertReplicaGroups(
@@ -248,6 +475,17 @@ absl::StatusOr<std::vector<ReplicaGroup>> ConvertReplicaGroups(
     }
   }
   return replica_groups;
+}
+
+absl::StatusOr<std::vector<ReplicaGroup>> ConvertReplicaGroupsToV1(
+    mlir::Attribute replica_groups, mlir::Operation* op) {
+  if (auto dense_attr =
+          mlir::dyn_cast_or_null<mlir::DenseIntElementsAttr>(replica_groups)) {
+    return ConvertReplicaGroups(dense_attr);
+  }
+  TF_ASSIGN_OR_RETURN(auto device_list,
+                      ConvertReplicaGroups(replica_groups, op));
+  return device_list->replica_groups();
 }
 
 // Convert a (N, 2) dense attribute to a list of tuples. This is the way padding
