@@ -531,7 +531,7 @@ def lib_name(base_name, cpu_value, version = None, static = False):
         The platform-specific name of the library.
       """
     version = "" if not version else "." + version
-    if cpu_value in ("Linux", "FreeBSD"):
+    if cpu_value in ("Linux", "FreeBSD", "QNX"):
         if static:
             return "lib%s.a" % base_name
         return "lib%s.so%s" % (base_name, version)
