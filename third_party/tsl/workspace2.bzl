@@ -336,12 +336,11 @@ def _tf_repositories():
     # WARNING: make sure ncteisen@ and vpai@ are cc-ed on any CL to change the below rule
     tf_http_archive(
         name = "com_github_grpc_grpc",
-        sha256 = "b956598d8cbe168b5ee717b5dafa56563eb5201a947856a6688bbeac9cac4e1f",
-        strip_prefix = "grpc-b54a5b338637f92bfcf4b0bc05e0f57a5fd8fadd",
+        sha256 = "621d39bf615445f559cf3fe7786fb972993ec420ac580fcfee273918293c6b6e",
+        strip_prefix = "grpc-c288fa6f43a7f946a312723b81d55714046a7cff",
         system_build_file = "//third_party/systemlibs:grpc.BUILD",
         patch_file = [
             "//third_party/grpc:generate_cc_env_fix.patch",
-            "//third_party/grpc:register_go_toolchain.patch",
         ],
         system_link_files = {
             "//third_party/systemlibs:BUILD": "bazel/BUILD",
@@ -352,7 +351,7 @@ def _tf_repositories():
             "//third_party/systemlibs:grpc.bazel.generate_cc.bzl": "bazel/generate_cc.bzl",
             "//third_party/systemlibs:grpc.bazel.protobuf.bzl": "bazel/protobuf.bzl",
         },
-        urls = tf_mirror_urls("https://github.com/grpc/grpc/archive/b54a5b338637f92bfcf4b0bc05e0f57a5fd8fadd.tar.gz"),
+        urls = tf_mirror_urls("https://github.com/eleir9268/grpc/archive/c288fa6f43a7f946a312723b81d55714046a7cff.tar.gz"),
     )
 
     llvm_setup(name = "llvm-project")
