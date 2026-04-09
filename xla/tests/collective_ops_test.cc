@@ -13,27 +13,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "xla/tests/xla_test_backend_predicates.h"
 #include "absl/strings/str_replace.h"
 #include "absl/types/span.h"
 #include "ml_dtypes/include/float8.h"
-#include "xla/hlo/testlib/verified_hlo_module.h"
 #include "xla/literal.h"
 #include "xla/literal_util.h"
 #include "xla/primitive_util.h"
 #include "xla/service/computation_placer.h"
 #include "xla/service/hlo_module_config.h"
-#include "xla/tests/hlo_test_base.h"
+#include "xla/service/hlo_runner_interface.h"
+#include "xla/tests/hlo_pjrt_test_base.h"
 #include "xla/tests/literal_test_util.h"
-#include "xla/tests/test_utils.h"
 #include "xla/tsl/lib/core/status_test_util.h"
 #include "xla/tsl/platform/env.h"
 #include "xla/tsl/platform/logging.h"
@@ -50,15 +47,17 @@ namespace {
 //
 // Several tests requires at least four GPUs.  For instructions on running this
 // within Google, see go/multi-gpu-unit-test.
-class CollectiveOpsTest : public HloTestBase {
+class CollectiveOpsTest : public HloPjRtTestBase {
  public:
   CollectiveOpsTest() {
     VLOG(1) << "Running with " << num_devices() << " devices";
   }
 
+  int64_t num_devices() const { return test_runner().device_count(); }
+
  protected:
   DebugOptions GetDebugOptionsForTest() const override {
-    DebugOptions debug_options = HloTestBase::GetDebugOptionsForTest();
+    DebugOptions debug_options = HloPjRtTestBase::GetDebugOptionsForTest();
     // Disable async->sync collective conversion pass to enable unit testing
     // of async collectives.
     debug_options.add_xla_disable_hlo_passes(
@@ -414,8 +413,13 @@ TEST_F(CollectiveOpsTest, AllReduce_AllCombinations) {
 // http://b/259130904 [XLA:GPU] AllReduce_ManyConcurrentAllReduces subtest fails
 //                     with async all-reduce enables
 TEST_F(CollectiveOpsTest, AllReduce_ManyConcurrentAllReduces) {
-  if (test::DeviceTypeIs(test::kGpu)) {
-    GTEST_SKIP();
+  if (test::DeviceIs(test::kGpu)) {
+    GTEST_SKIP() << "b/259130904: fails with async all-reduce enabled.";
+  }
+  // PjRt CPU runtime deadlocks under heavy concurrent execution of collective
+  // operations.
+  if (test::DeviceIs(test::kCpu)) {
+    GTEST_SKIP() << "Disabled on PjRt due to runtime deadlocks";
   }
   const int64_t kNumElems = 1024;
   const int64_t kNumThreads = 200;
@@ -442,9 +446,10 @@ TEST_F(CollectiveOpsTest, AllReduce_ManyConcurrentAllReduces) {
   tsl::thread::ThreadPool pool(tsl::Env::Default(), TestName(), kNumThreads);
   for (int64_t i = 0; i < kNumThreads * kRunsPerThread; ++i) {
     pool.Schedule([&] {
-      TF_ASSERT_OK(
-          ExecuteReplicatedWithHloRunner(executable.get(), opts, &device_assn)
-              .status());
+      TF_ASSERT_OK(test_runner()
+                       .ExecuteReplicatedWithExecutable(executable.get(), opts,
+                                                        &device_assn)
+                       .status());
       done.DecrementCount();
     });
   }
@@ -673,7 +678,7 @@ TEST_F(CollectiveOpsTest, ReplicaId) {
   HloModuleConfig config =
       GetModuleConfigForTest(/*replica_count=*/num_devices());
   TF_ASSERT_OK_AND_ASSIGN(auto module,
-                          ParseAndReturnVerifiedModule(kModuleStr));
+                          ParseAndReturnVerifiedModule(kModuleStr, config));
 
   TF_ASSERT_OK_AND_ASSIGN(
       std::vector<Literal> results,
@@ -2663,19 +2668,13 @@ TEST_F(CollectiveOpsTest, SendRecvCrossPartition) {
 class Fp8CollectiveOpsTest : public CollectiveOpsTest {
  public:
   Fp8CollectiveOpsTest() {
+    bool is_cuda =
+        test_runner().HasProperty(HloRunnerPropertyTag::kUsingGpuCuda);
     replacements_[kF8E4M3DatatypePlaceholder] =
-        Capability().IsCuda() ? "f8e4m3fn" : "f8e4m3fnuz";
+        is_cuda ? "f8e4m3fn" : "f8e4m3fnuz";
     replacements_[kF8E5M2DatatypePlaceholder] =
-        Capability().IsCuda() ? "f8e5m2" : "f8e5m2fnuz";
+        is_cuda ? "f8e5m2" : "f8e5m2fnuz";
     replacements_[kF8E8M0DatatypePlaceholder] = "f8e8m0fnu";
-  }
-
- protected:
-  const se::GpuComputeCapability& Capability() {
-    return backend()
-        .default_stream_executor()
-        ->GetDeviceDescription()
-        .gpu_compute_capability();
   }
 
   absl::flat_hash_map<absl::string_view, absl::string_view> replacements_;
