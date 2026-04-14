@@ -57,21 +57,6 @@ cc_library(
         "gloo/rendezvous/prefix_store.cc",
         "gloo/rendezvous/store.cc",
     ] + select({
-        "@xla//xla/tsl:linux_aarch64": [
-            "gloo/common/linux.cc",
-        ],
-        "@xla//xla/tsl:linux_armhf": [
-            "gloo/common/linux.cc",
-        ],
-        "@xla//xla/tsl:linux_ppc64le": [
-            "gloo/common/linux.cc",
-        ],
-        "@xla//xla/tsl:linux_s390x": [
-            "gloo/common/linux.cc",
-        ],
-        "@xla//xla/tsl:linux_x86_64": [
-            "gloo/common/linux.cc",
-        ],
         "//conditions:default": [],
     }),
     copts = [
