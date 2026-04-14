@@ -1,5 +1,5 @@
 diff --git a/utils/bazel/llvm-project-overlay/llvm/config.bzl b/utils/bazel/llvm-project-overlay/llvm/config.bzl
-index 2309175d04a9..b0d422277de0 100644
+index 2309175d04a9..7788afb69abf 100644
 --- a/utils/bazel/llvm-project-overlay/llvm/config.bzl
 +++ b/utils/bazel/llvm-project-overlay/llvm/config.bzl
 @@ -28,7 +28,6 @@ def native_arch_defines(arch, triple):
@@ -18,3 +18,12 @@ index 2309175d04a9..b0d422277de0 100644
      "HAVE_SYS_IOCTL_H=1",
      "HAVE_UNISTD_H=1",
  ]
+@@ -86,7 +84,7 @@ os_defines = select({
+     "@bazel_tools//src/conditions:windows": win32_defines,
+     "@bazel_tools//src/conditions:darwin": macos_defines,
+     "@bazel_tools//src/conditions:freebsd": posix_defines,
+-    "//conditions:default": linux_defines,
++    "//conditions:default": posix_defines,
+ })
+ 
+ # HAVE_BUILTIN_THREAD_POINTER is true for on Linux (outside of ppc64) for
