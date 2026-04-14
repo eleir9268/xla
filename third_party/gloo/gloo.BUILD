@@ -57,11 +57,10 @@ cc_library(
         "gloo/rendezvous/prefix_store.cc",
         "gloo/rendezvous/store.cc",
     ] + select({
-        "@xla//xla/tsl:macos": [],
-        "@xla//xla/tsl:windows": [],
-        "//conditions:default": [
+        "@xla//xla/tsl:linux": [
             "gloo/common/linux.cc",
         ],
+        "//conditions:default": [],
     }),
     copts = [
         "-fexceptions",
