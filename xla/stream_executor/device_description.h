@@ -149,8 +149,8 @@ struct CudaComputeCapability {
 
   CudaComputeCapabilityProto ToProto() const {
     CudaComputeCapabilityProto proto;
-    proto.set_major(major);
-    proto.set_minor(minor);
+    proto.set__major(major);
+    proto.set__minor(minor);
     return proto;
   }
 };
