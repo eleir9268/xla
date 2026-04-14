@@ -1,8 +1,16 @@
 diff --git a/utils/bazel/llvm-project-overlay/llvm/config.bzl b/utils/bazel/llvm-project-overlay/llvm/config.bzl
-index 2309175d04a9..45916b410825 100644
+index 2309175d04a9..b0d422277de0 100644
 --- a/utils/bazel/llvm-project-overlay/llvm/config.bzl
 +++ b/utils/bazel/llvm-project-overlay/llvm/config.bzl
-@@ -43,7 +43,6 @@ posix_defines = [
+@@ -28,7 +28,6 @@ def native_arch_defines(arch, triple):
+ 
+ posix_defines = [
+     "LLVM_ON_UNIX=1",
+-    "HAVE_BACKTRACE=1",
+     "BACKTRACE_HEADER=<execinfo.h>",
+     r'LTDL_SHLIB_EXT=\".so\"',
+     r'LLVM_PLUGIN_EXT=\".so\"',
+@@ -43,7 +42,6 @@ posix_defines = [
      "HAVE_REGISTER_FRAME=1",
      "HAVE_SETENV_R=1",
      "HAVE_STRERROR_R=1",
