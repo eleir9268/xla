@@ -1,5 +1,5 @@
 diff --git a/utils/bazel/llvm-project-overlay/llvm/config.bzl b/utils/bazel/llvm-project-overlay/llvm/config.bzl
-index 2309175d04a9..7788afb69abf 100644
+index 2e3bff53ead9..efabfd80aff3 100644
 --- a/utils/bazel/llvm-project-overlay/llvm/config.bzl
 +++ b/utils/bazel/llvm-project-overlay/llvm/config.bzl
 @@ -28,7 +28,6 @@ def native_arch_defines(arch, triple):
@@ -10,15 +10,15 @@ index 2309175d04a9..7788afb69abf 100644
      "BACKTRACE_HEADER=<execinfo.h>",
      r'LTDL_SHLIB_EXT=\".so\"',
      r'LLVM_PLUGIN_EXT=\".so\"',
-@@ -43,7 +42,6 @@ posix_defines = [
+@@ -41,7 +40,6 @@ posix_defines = [
      "HAVE_REGISTER_FRAME=1",
      "HAVE_SETENV_R=1",
      "HAVE_STRERROR_R=1",
 -    "HAVE_SYSEXITS_H=1",
-     "HAVE_SYS_IOCTL_H=1",
      "HAVE_UNISTD_H=1",
  ]
-@@ -86,7 +84,7 @@ os_defines = select({
+ 
+@@ -83,7 +81,7 @@ os_defines = select({
      "@bazel_tools//src/conditions:windows": win32_defines,
      "@bazel_tools//src/conditions:darwin": macos_defines,
      "@bazel_tools//src/conditions:freebsd": posix_defines,
