@@ -69,8 +69,8 @@ struct CudaComputeCapability {
   }
 
   explicit CudaComputeCapability(const CudaComputeCapabilityProto &proto) {
-    this->major = proto.major();
-    this->minor = proto.minor();
+    this->major = proto._major();
+    this->minor = proto._minor();
   }
 
   static CudaComputeCapability Hopper() {
