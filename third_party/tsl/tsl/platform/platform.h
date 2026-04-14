@@ -18,7 +18,6 @@ limitations under the License.
 
 // Set one PLATFORM_* macro and set IS_MOBILE_PLATFORM if the platform is for
 // mobile.
-
 #if !defined(PLATFORM_POSIX) && !defined(PLATFORM_GOOGLE) &&                 \
     !defined(PLATFORM_POSIX_ANDROID) && !defined(PLATFORM_GOOGLE_ANDROID) && \
     !defined(PLATFORM_WINDOWS)
@@ -32,6 +31,10 @@ limitations under the License.
 #include "TargetConditionals.h"
 #if TARGET_IPHONE_SIMULATOR || TARGET_OS_IPHONE
 #define PLATFORM_POSIX_IOS
+#define IS_MOBILE_PLATFORM
+
+#elif defined(__QNX__)
+#define PLATFORM_POSIX
 #define IS_MOBILE_PLATFORM
 #else
 // If no platform specified, use:

@@ -1203,12 +1203,12 @@ class VersionInfo {
   explicit VersionInfo(int major = 0, int minor = 0, int patch = 0)
       : major_(major), minor_(minor), patch_(patch) {}
   explicit VersionInfo(DnnVersionInfoProto proto)
-      : major_(proto.major()), minor_(proto.minor()), patch_(proto.patch()) {}
+      : major_(proto._major()), minor_(proto._minor()), patch_(proto.patch()) {}
 
   DnnVersionInfoProto ToProto() const {
     DnnVersionInfoProto proto;
-    proto.set_major(major_);
-    proto.set_minor(minor_);
+    proto.set__major(major_);
+    proto.set__minor(minor_);
     proto.set_patch(patch_);
     return proto;
   }

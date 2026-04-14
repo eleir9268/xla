@@ -1,0 +1,42 @@
+diff --git a/llvm/include/llvm/TableGen/Main.h b/llvm/include/llvm/TableGen/Main.h
+index 5f68be188de7..bf58f3d3e56d 100644
+--- a/llvm/include/llvm/TableGen/Main.h
++++ b/llvm/include/llvm/TableGen/Main.h
+@@ -23,7 +23,7 @@ class RecordKeeper;
+ 
+ /// Perform the action using Records, and write output to OS.
+ /// Returns true on error, false otherwise.
+-using TableGenMainFn = bool(raw_ostream &OS, const RecordKeeper &Records);
++using TableGenMainFn = bool(raw_ostream &, RecordKeeper &);
+ 
+ int TableGenMain(const char *argv0,
+                  std::function<TableGenMainFn> MainFn = nullptr);
+diff --git a/utils/bazel/llvm-project-overlay/llvm/config.bzl b/utils/bazel/llvm-project-overlay/llvm/config.bzl
+index 2309175d04a9..7788afb69abf 100644
+--- a/utils/bazel/llvm-project-overlay/llvm/config.bzl
++++ b/utils/bazel/llvm-project-overlay/llvm/config.bzl
+@@ -28,7 +28,6 @@ def native_arch_defines(arch, triple):
+ 
+ posix_defines = [
+     "LLVM_ON_UNIX=1",
+-    "HAVE_BACKTRACE=1",
+     "BACKTRACE_HEADER=<execinfo.h>",
+     r'LTDL_SHLIB_EXT=\".so\"',
+     r'LLVM_PLUGIN_EXT=\".so\"',
+@@ -43,7 +42,6 @@ posix_defines = [
+     "HAVE_REGISTER_FRAME=1",
+     "HAVE_SETENV_R=1",
+     "HAVE_STRERROR_R=1",
+-    "HAVE_SYSEXITS_H=1",
+     "HAVE_SYS_IOCTL_H=1",
+     "HAVE_UNISTD_H=1",
+ ]
+@@ -86,7 +84,7 @@ os_defines = select({
+     "@bazel_tools//src/conditions:windows": win32_defines,
+     "@bazel_tools//src/conditions:darwin": macos_defines,
+     "@bazel_tools//src/conditions:freebsd": posix_defines,
+-    "//conditions:default": linux_defines,
++    "//conditions:default": posix_defines,
+ })
+ 
+ # HAVE_BUILTIN_THREAD_POINTER is true for on Linux (outside of ppc64) for

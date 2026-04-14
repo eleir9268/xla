@@ -20,6 +20,10 @@ limitations under the License.
 #include "tsl/platform/platform.h"
 // clang-format on
 
+#ifdef __QNX__
+#define IS_MOBILE_PLATFORM
+#endif
+
 #if !defined(IS_MOBILE_PLATFORM) && (defined(__clang__) || defined(__GNUC__))
 #define TF_HAS_STACKTRACE
 #endif
