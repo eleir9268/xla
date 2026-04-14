@@ -26,7 +26,7 @@ limitations under the License.
 #if defined(__linux__)
 #include <sched.h>
 #include <sys/sysinfo.h>
-#else
+#elif !defined(__QNX__)
 #include <sys/syscall.h>
 #endif
 
